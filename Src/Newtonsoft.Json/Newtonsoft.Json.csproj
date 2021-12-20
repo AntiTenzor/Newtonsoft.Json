@@ -4,9 +4,9 @@
     <TargetFrameworks Condition="'$(LibraryFrameworks)'!=''">$(LibraryFrameworks)</TargetFrameworks>
     <LangVersion>9.0</LangVersion>
     <!-- version numbers will be updated by build -->
-    <AssemblyVersion>11.0.0.0</AssemblyVersion>
-    <FileVersion>11.0.1</FileVersion>
-    <VersionPrefix>11.0.1</VersionPrefix>
+    <AssemblyVersion>13.0.1.1</AssemblyVersion>
+    <FileVersion>13.0.1.1</FileVersion>
+    <VersionPrefix>13.0.1</VersionPrefix>
     <VersionSuffix>beta2</VersionSuffix>
     <Authors>James Newton-King</Authors>
     <Company>Newtonsoft</Company>
