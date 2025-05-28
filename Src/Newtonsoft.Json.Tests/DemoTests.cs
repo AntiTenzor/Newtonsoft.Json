@@ -596,6 +596,29 @@ namespace Newtonsoft.Json.Tests
 }", json);
         }
 
+        [Test]
+        public void DeserializeMemoryStream()
+        {
+            const string json = @"[3,17,5,19,   101   ]   ";
+
+            byte[] buf = Encoding.ASCII.GetBytes(json);
+            Assert.AreEqual(json.Length, buf.Length, "Unexpected buffer length");
+
+            IList<int> value;
+            JsonSerializer serializer = new JsonSerializer();
+            using (MemoryStream ms = new MemoryStream(buf))
+            using (JsonMsAsciiReader reader = new JsonMsAsciiReader(ms))
+            {
+                //reader.ArrayPool = JsonArrayPool.Instance;
+
+                value = serializer.Deserialize<IList<int>>(reader);
+            }
+
+            Assert.AreEqual(5, value.Count, "Unexpected result list length");
+            Assert.AreEqual(19, value[3], "Unexpected result value at index 3");
+            Assert.AreEqual(101, value[4], "Unexpected result value at index 4");
+        }
+
 #if !(NET20 || NET35 || NET40 || PORTABLE || PORTABLE40 || DNXCORE50) || NETSTANDARD2_0
         [Test]
         public void ArrayPooling()
