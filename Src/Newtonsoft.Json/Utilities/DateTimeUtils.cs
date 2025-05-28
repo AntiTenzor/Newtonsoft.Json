@@ -316,9 +316,72 @@ namespace Newtonsoft.Json.Utilities
             dt = new DateTimeOffset(d, offset);
             return true;
         }
+
+        internal static bool TryParseDateTimeOffsetIso(ByteStringReference text, out DateTimeOffset dt)
+        {
+            DateTimeByteParser dateTimeParser = new DateTimeByteParser();
+            if (!dateTimeParser.Parse(text.Chars, text.StartIndex, text.Length))
+            {
+                dt = default;
+                return false;
+            }
+
+            DateTime d = CreateDateTime(dateTimeParser);
+
+            TimeSpan offset;
+
+            switch (dateTimeParser.Zone)
+            {
+                case ParserTimeZone.Utc:
+                    offset = new TimeSpan(0L);
+                    break;
+                case ParserTimeZone.LocalWestOfUtc:
+                    offset = new TimeSpan(-dateTimeParser.ZoneHour, -dateTimeParser.ZoneMinute, 0);
+                    break;
+                case ParserTimeZone.LocalEastOfUtc:
+                    offset = new TimeSpan(dateTimeParser.ZoneHour, dateTimeParser.ZoneMinute, 0);
+                    break;
+                default:
+                    offset = TimeZoneInfo.Local.GetUtcOffset(d);
+                    break;
+            }
+
+            long ticks = d.Ticks - offset.Ticks;
+            if (ticks < 0 || ticks > 3155378975999999999)
+            {
+                dt = default;
+                return false;
+            }
+
+            dt = new DateTimeOffset(d, offset);
+            return true;
+        }
 #endif
 
         private static DateTime CreateDateTime(DateTimeParser dateTimeParser)
+        {
+            bool is24Hour;
+            if (dateTimeParser.Hour == 24)
+            {
+                is24Hour = true;
+                dateTimeParser.Hour = 0;
+            }
+            else
+            {
+                is24Hour = false;
+            }
+
+            DateTime d = new DateTime(dateTimeParser.Year, dateTimeParser.Month, dateTimeParser.Day, dateTimeParser.Hour, dateTimeParser.Minute, dateTimeParser.Second);
+            d = d.AddTicks(dateTimeParser.Fraction);
+
+            if (is24Hour)
+            {
+                d = d.AddDays(1);
+            }
+            return d;
+        }
+
+        private static DateTime CreateDateTime(DateTimeByteParser dateTimeParser)
         {
             bool is24Hour;
             if (dateTimeParser.Hour == 24)
@@ -450,6 +513,48 @@ namespace Newtonsoft.Json.Utilities
             return false;
         }
 
+        internal static bool TryParseDateTimeOffset(ByteStringReference s, string? dateFormatString, CultureInfo culture, out DateTimeOffset dt)
+        {
+            if (s.Length > 0)
+            {
+                int i = s.StartIndex;
+                if (s[i] == '/')
+                {
+                    if (s.Length >= 9 && s.StartsWith("/Date(") && s.EndsWith(")/"))
+                    {
+                        if (TryParseDateTimeOffsetMicrosoft(s, out dt))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                else if (s.Length >= 19 && s.Length <= 40)
+                {
+                    // char.IsDigit(s[i])
+                    byte b = s[i];
+                    bool isDigit = ((b >= '0') && (b <= '9'));
+                    if (isDigit && s[i + 10] == 'T')
+                    {
+                        if (TryParseDateTimeOffsetIso(s, out dt))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                if (!StringUtils.IsNullOrEmpty(dateFormatString))
+                {
+                    if (TryParseDateTimeOffsetExact(s.ToString(), dateFormatString, culture, out dt))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            dt = default;
+            return false;
+        }
+
         internal static bool TryParseDateTimeOffset(string s, string? dateFormatString, CultureInfo culture, out DateTimeOffset dt)
         {
             if (s.Length > 0)
@@ -519,6 +624,38 @@ namespace Newtonsoft.Json.Utilities
             return (ConvertUtils.Int64TryParse(text.Chars, 6 + text.StartIndex, index - 6, out ticks) == ParseResult.Success);
         }
 
+        private static bool TryParseMicrosoftDate(ByteStringReference text, out long ticks, out TimeSpan offset, out DateTimeKind kind)
+        {
+            kind = DateTimeKind.Utc;
+
+            int index = text.IndexOf('+', 7, text.Length - 8);
+
+            if (index == -1)
+            {
+                index = text.IndexOf('-', 7, text.Length - 8);
+            }
+
+            if (index != -1)
+            {
+                kind = DateTimeKind.Local;
+
+                if (!TryReadOffset(text, index + text.StartIndex, out offset))
+                {
+                    ticks = 0;
+                    return false;
+                }
+            }
+            else
+            {
+                offset = TimeSpan.Zero;
+                index = text.Length - 2;
+            }
+
+            ParseResult parseRes = ConvertUtils.Int64TryParse(text.Chars, 6 + text.StartIndex, index - 6, out ticks);
+            bool res = (parseRes == ParseResult.Success);
+            return res;
+        }
+
         private static bool TryParseDateTimeMicrosoft(StringReference text, DateTimeZoneHandling dateTimeZoneHandling, out DateTime dt)
         {
             if (!TryParseMicrosoftDate(text, out long ticks, out _, out DateTimeKind kind))
@@ -574,6 +711,20 @@ namespace Newtonsoft.Json.Utilities
             return true;
         }
 
+        private static bool TryParseDateTimeOffsetMicrosoft(ByteStringReference text, out DateTimeOffset dt)
+        {
+            if (!TryParseMicrosoftDate(text, out long ticks, out TimeSpan offset, out _))
+            {
+                dt = default(DateTime);
+                return false;
+            }
+
+            DateTime utcDateTime = ConvertJavaScriptTicksToDateTime(ticks);
+
+            dt = new DateTimeOffset(utcDateTime.Add(offset).Ticks, offset);
+            return true;
+        }
+
         private static bool TryParseDateTimeOffsetExact(string text, string dateFormatString, CultureInfo culture, out DateTimeOffset dt)
         {
             if (DateTimeOffset.TryParseExact(text, dateFormatString, culture, DateTimeStyles.RoundtripKind, out DateTimeOffset temp))
@@ -588,6 +739,35 @@ namespace Newtonsoft.Json.Utilities
 #endif
 
         private static bool TryReadOffset(StringReference offsetText, int startIndex, out TimeSpan offset)
+        {
+            bool negative = (offsetText[startIndex] == '-');
+
+            if (ConvertUtils.Int32TryParse(offsetText.Chars, startIndex + 1, 2, out int hours) != ParseResult.Success)
+            {
+                offset = default;
+                return false;
+            }
+
+            int minutes = 0;
+            if (offsetText.Length - startIndex > 5)
+            {
+                if (ConvertUtils.Int32TryParse(offsetText.Chars, startIndex + 3, 2, out minutes) != ParseResult.Success)
+                {
+                    offset = default;
+                    return false;
+                }
+            }
+
+            offset = TimeSpan.FromHours(hours) + TimeSpan.FromMinutes(minutes);
+            if (negative)
+            {
+                offset = offset.Negate();
+            }
+
+            return true;
+        }
+
+        private static bool TryReadOffset(ByteStringReference offsetText, int startIndex, out TimeSpan offset)
         {
             bool negative = (offsetText[startIndex] == '-');
 

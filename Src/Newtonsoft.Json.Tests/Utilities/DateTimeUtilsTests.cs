@@ -54,6 +54,11 @@ namespace Newtonsoft.Json.Tests.Utilities
             return new StringReference(s.ToCharArray(), 0, s.Length);
         }
 
+        private static ByteStringReference CreateByteStringReference(string s)
+        {
+            return new ByteStringReference(s.ToCharArray(), 0, s.Length);
+        }
+
         private static void RoundtripDateIso(DateTime value)
         {
             StringWriter sw = new StringWriter();
@@ -178,6 +183,21 @@ namespace Newtonsoft.Json.Tests.Utilities
         {
             char[] c = @"12345/Date(1418924498000+0800)/12345".ToCharArray();
             StringReference reference = new StringReference(c, 5, c.Length - 10);
+
+            DateTimeOffset d;
+            DateTimeUtils.TryParseDateTimeOffset(reference, null, CultureInfo.InvariantCulture, out d);
+
+            long initialTicks = DateTimeUtils.ConvertDateTimeToJavaScriptTicks(d.DateTime, d.Offset);
+
+            Assert.AreEqual(1418924498000, initialTicks);
+            Assert.AreEqual(8, d.Offset.Hours);
+        }
+
+        [Test]
+        public void ReadOffsetMSDateTimeOffset03()
+        {
+            char[] c = @"12345/Date(1418924498000+0800)/12345".ToCharArray();
+            ByteStringReference reference = new ByteStringReference(c, 5, c.Length - 10);
 
             DateTimeOffset d;
             DateTimeUtils.TryParseDateTimeOffset(reference, null, CultureInfo.InvariantCulture, out d);
